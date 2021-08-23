@@ -7,8 +7,8 @@ from click import Option
 from celery.app.utils import find_app
 from celery.app.control import Control, Inspect
 
+from celery_center.branch.subprocess import SubprocessBranch
 from .base import WorkspaceBase
-from .branch.subprocess import SubprocessBranch
 from .utils import get_worker_cmd, get_hostname
 
 
