@@ -74,7 +74,7 @@ class CeleryCenter:
         self.CeleryCenterTask = CeleryCenterTask
         self._task_center_list = list()
         self._user_options = dict()
-        self._workspaces = list()
+        self._workspaces = dict()
 
     @property
     def task(self):
@@ -113,8 +113,8 @@ class CeleryCenter:
                 celery_instance.user_options['worker'].add(option)
 
     def add_workspace(self,
-            task_base: Type[Task],
             workspace_cls: Type[WorkspaceBase],
+            task_bases: List[Type[Task]],
             default_kwargs: Mapping[str, Any] = dict(),
             ):
         if not issubclass(workspace_cls, WorkspaceBase):
@@ -122,16 +122,18 @@ class CeleryCenter:
                 'Argument `workspace_cls` should be a subclass of '
                 '{WorkspaceBase}.'
             )
-        #TODO duplicated warning?
+        if workspace_cls in self._workspaces:
+            raise ValueError(f'workspace_cls `{workspace_cls}` duplicated.')
         def _register_workspace(**kwargs):
             obj = workspace_cls.register_workspace(**kwargs)
-            task_base.workspace = obj
+            for tb in task_bases:
+                tb.workspace = obj
 
         self.add_worker_options(
             workspace_cls.options(defaults=default_kwargs),
             callback=_register_workspace
         )
-        self._workspaces.append((workspace_cls, task_base))
+        self._workspaces[workspace_cls] = task_bases
 
     def add_worker_options(self,
             options: List[Option],
@@ -187,6 +189,9 @@ class CeleryCenter:
     def shutdown(self):
         if sys.argv[0].split(os.sep)[-1] == 'celery' and 'worker' in sys.argv:
             print('Execute shutdown handler...')
-            for _, task_base in self._workspaces:
+            for _, task_bases in self._workspaces.items():
+                if len(task_bases) == 0:
+                    continue
+                task_base = task_bases[0]
                 if getattr(task_base, 'workspace', None) is not None:
                     task_base.workspace.terminate()

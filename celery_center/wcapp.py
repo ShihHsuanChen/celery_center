@@ -20,8 +20,8 @@ def create_wcapp(
     workspace_kwargs['app_name'] = app_name
 
     celery_center.add_workspace(
-        WorkerControlTask,
         workspace_cls,
+        [WorkerControlTask],
         default_kwargs=workspace_kwargs
     )
     wcapp = celery_center.create_celery(
