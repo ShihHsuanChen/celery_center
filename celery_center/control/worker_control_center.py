@@ -1,5 +1,6 @@
 import time
 import json
+from pprint import pprint
 from typing import Optional, Union, Callable, Dict, List, Any, Type, Tuple, Iterable, Mapping
 from collections import OrderedDict
 
@@ -10,6 +11,7 @@ from celery.app.control import Control, Inspect
 from celery_center.branch.subprocess import SubprocessBranch
 from .base import WorkspaceBase
 from .utils import get_worker_cmd, get_hostname
+from .utils import parse_json_config, save_json_config
 
 
 class WorkerProcess:
@@ -93,8 +95,15 @@ class WorkerControlCenter(WorkspaceBase):
                 help='celery app module name'
             ),
             Option(
+                ('--init-cfg', 'init_cfg'),
+                default=defaults.get('init_cfg', None),
+                type=str,
+                help='initial config file in json format'
+            ),
+            Option(
                 ('--cfg-path', 'cfg_path'),
-                default=defaults.get('cfg_path'),
+                default=defaults.get('cfg_path', None),
+                type=str,
                 help='path of config file'
             ),
         ]
@@ -103,10 +112,6 @@ class WorkerControlCenter(WorkspaceBase):
     @classmethod
     def register_workspace(cls, **kwargs) -> object:
         app_name = kwargs.pop('app_name', None)
-        kwargs = {
-            k:v for k, v in kwargs.items()
-            if k in ['cfg_path', 'cfg']
-        }
         if app_name is not None:
             wcc = cls(app_name, **kwargs)
             wcc.start()
@@ -116,19 +121,46 @@ class WorkerControlCenter(WorkspaceBase):
 
     def __init__(self,
             app_name: str,
-            cfg: Optional[Mapping[str, Any]] = None,
+            init_cfg: Optional[Union[str, Mapping[str, Any]]] = None,
             cfg_path: Optional[str] = None,
+            **kwargs,
             ):
-        if not cfg_path: #TODO
-            cfg_path = 'worker_config.json'
+        r"""
+        cfg_path: None -> no state saved; otherwise -> save state when terminated, read state when started if json file is not empty
+        init_cfg: use when config read from cfg_path is empty
+        """
+        self.cfg_path = cfg_path
+        self.cfg = {'workers': dict()}
+        
+        if init_cfg is not None:
+            if isinstance(init_cfg, str):
+                cfgs = parse_json_config(init_cfg)
+                if cfgs is not None:
+                    global_cfg, init_cfg =  cfgs
+                else:
+                    ValueError(
+                        f'`init_cfg` should be a dict() in json.'
+                    )
+            elif isinstance(init_cfg, dict):
+                global_cfg = init_cfg.pop('global', dict())
+            else:
+                TypeError(
+                    f'Input argument `init_cfg` should be a path or a dict()'
+                )
 
-        if cfg is None:
-            with open(cfg_path, 'r') as fp:
-                cfg = json.load(fp)
-                for kc, _cfg in cfg.get('global', dict()).items():
-                    for c, kwargs in cfg[kc].items():
-                        cfg[kc][c] = {**_cfg, **kwargs}
-        self.cfg = cfg
+        if cfg_path is not None:
+            cfgs = parse_json_config(cfg_path)
+            if cfgs is not None:
+                global_cfg, init_cfg = cfgs
+            else:
+                ValueError(
+                    f'object in `cfg_path` should be a dict().'
+                )
+        pprint(init_cfg['workers'])
+
+        self.global_cfg, self.init_cfg = global_cfg, init_cfg
+        self.global_cfg.setdefault('workers', dict())
+        self.init_cfg.setdefault('workers', dict())
         self.cfg_path = cfg_path
         self.app_name = app_name
         self.app = find_app(app_name)
@@ -180,8 +212,9 @@ class WorkerControlCenter(WorkspaceBase):
             return 
         run_config['hostname'] = node
         wp = WorkerProcess(self.app_name, **run_config)
-        self._wpdict[node] = wp
         wp.start()
+        self._wpdict[node] = wp
+        self.cfg['workers'][node] = run_config
         if wait_for_ready:
             if not wp.wait_for_ready():
                 wp.shutdown()
@@ -210,6 +243,7 @@ class WorkerControlCenter(WorkspaceBase):
         nodes = self._get_nodes(nodes=nodes)
         for node in nodes:
             self._wpdict[node].shutdown(join=False)
+            self.cfg['workers'].pop(node, None)
         if join:
             self.join(nodes, timeout=timeout)
 
@@ -223,7 +257,7 @@ class WorkerControlCenter(WorkspaceBase):
             del self._wpdict[node]
 
     def start(self, eventloop: bool = False):
-        for node, run_config in self.cfg['workers'].items():
+        for node, run_config in self.init_cfg['workers'].items():
             self.start_worker(node, run_config, wait_for_ready=False)
         if eventloop:
             try:
@@ -234,6 +268,14 @@ class WorkerControlCenter(WorkspaceBase):
                 self.terminate()
 
     def terminate(self, timeout: Optional[int] = None):
+        # save config
+        if self.cfg_path is not None:
+            print('Save config')
+            save_json_config(
+                self.cfg_path,
+                self.cfg,
+                global_config=self.global_cfg
+            )
         self.stop_workers(timeout=timeout)
 
     def _main_eventloop(self):

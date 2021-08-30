@@ -1,4 +1,6 @@
-from typing import Optional, Dict, List, Any, Tuple
+import os
+import json
+from typing import Optional, Dict, List, Any, Tuple, Union
 
 from celery.utils.nodenames import default_nodename, host_format
 
@@ -37,3 +39,34 @@ def get_worker_cmd(
 
 def get_hostname(node: str) -> str:
     return host_format(default_nodename(node))
+
+
+def read_json(path: str) -> Union[None, dict]:
+    data = None
+    if os.path.exists(path):
+        with open(path, 'r') as fp:
+            text = fp.read()
+            if len(text) >= 0:
+                data = json.loads(text)
+                assert isinstance(data, dict)
+    return data
+
+
+def parse_json_config(path: str) -> Union[None, Tuple[dict, dict]]:
+    data = read_json(path)
+    if data is None:
+        return None
+    global_config = data.pop('global', dict())
+    config = {
+        kc: {
+            k: {**global_config.get(kc, dict()), **c}
+            for k, c in cfg.items()
+        } for kc, cfg in data.items()
+    }
+    return global_config, config
+
+
+def save_json_config(path: str, config: dict(), global_config: dict = dict()):
+    config = {'global': global_config, **config}
+    with open(path, 'w') as fp:
+        json.dump(config, fp)
