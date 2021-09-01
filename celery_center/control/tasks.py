@@ -33,12 +33,12 @@ def inspect(func: Callable[[Inspect], Any]):
 
 
 @force_sync
-@celery_center.task(base=WorkerControlTask, bind=True, name='info')
+@celery_center.task(base=WorkerControlTask, bind=True, name='control.info')
 def info(task):
     return task.workspace.info()
 
 
-@celery_center.task(base=WorkerControlTask, bind=True, name='_inspect')
+@celery_center.task(base=WorkerControlTask, bind=True, name='control._inspect')
 def _inspect(task, codestr):
     codebytes = base64.b64decode(codestr.encode())
     func = FunctionType(marshal.loads(codebytes), globals())
@@ -46,7 +46,7 @@ def _inspect(task, codestr):
 
 
 @force_sync
-@celery_center.task(base=WorkerControlTask, bind=True, name='active_queue_names')
+@celery_center.task(base=WorkerControlTask, bind=True, name='control.active_queue_names')
 def active_queue_names(task):
     aq = task.workspace.inspect.active_queues()
     if aq is None:
@@ -54,11 +54,11 @@ def active_queue_names(task):
     return list({q['name'] for qlist in aq.values() for q in qlist})
 
 
-@celery_center.task(base=WorkerControlTask, bind=True, name='create_worker')
+@celery_center.task(base=WorkerControlTask, bind=True, name='control.create_worker')
 def create_worker(task, node, kwargs=dict()):
     return task.workspace.start_worker(node, kwargs, wait_for_ready=True)
 
 
-@celery_center.task(base=WorkerControlTask, bind=True, name='remove_worker')
+@celery_center.task(base=WorkerControlTask, bind=True, name='control.remove_worker')
 def remove_worker(task, node):
     task.workspace.stop_workers(node, join=True)
